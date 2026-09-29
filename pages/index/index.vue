@@ -29,12 +29,12 @@
 		data() {
 			return {
 				tools: [
-					{ name: '时间戳转换', desc: 'Unix 时间与日期互转', icon: '⏱', color: '#5B8FF9', path: '' },
+					{ name: '二维码', desc: '文本生成二维码', icon: '▦', color: '#269A99', path: '/pages/qrcode/qrcode' },
+					{ name: '计算器', desc: '日常四则运算', icon: '=', color: '#5B8FF9', path: '/pages/calculator/calculator' },
+					{ name: '时间戳转换', desc: 'Unix 时间与日期互转', icon: '⏱', color: '#F6BD16', path: '' },
 					{ name: 'JSON 格式化', desc: '格式化 / 压缩 / 校验', icon: '{}', color: '#5AD8A6', path: '' },
-					{ name: '编码解码', desc: 'Base64 / URL 编码', icon: '⇄', color: '#F6BD16', path: '' },
-					{ name: '正则测试', desc: '实时匹配与高亮', icon: '.*', color: '#E8684A', path: '' },
-					{ name: '颜色转换', desc: 'HEX / RGB / HSL 互转', icon: '◐', color: '#9270CA', path: '' },
-					{ name: '二维码', desc: '文本生成二维码', icon: '▦', color: '#269A99', path: '' }
+					{ name: '编码解码', desc: 'Base64 / URL 编码', icon: '⇄', color: '#9270CA', path: '' },
+					{ name: '正则测试', desc: '实时匹配与高亮', icon: '.*', color: '#E8684A', path: '' }
 				]
 			}
 		},
@@ -53,7 +53,8 @@
 <style>
 	.page {
 		min-height: 100vh;
-		padding: 32rpx 24rpx 48rpx;
+		/* 页面用了自定义导航栏，自己给状态栏留出高度 */
+		padding: calc(var(--status-bar-height, 0px) + 32rpx) 24rpx 48rpx;
 		box-sizing: border-box;
 		background-color: #F5F6FA;
 	}

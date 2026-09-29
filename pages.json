@@ -5,11 +5,23 @@
 			"style": {
 				"navigationStyle": "custom"
 			}
+		},
+		{
+			"path": "pages/qrcode/qrcode",
+			"style": {
+				"navigationBarTitleText": "二维码生成"
+			}
+		},
+		{
+			"path": "pages/calculator/calculator",
+			"style": {
+				"navigationBarTitleText": "计算器"
+			}
 		}
 	],
 	"globalStyle": {
 		"navigationBarTextStyle": "black",
-		"navigationBarTitleText": "uni-app",
+		"navigationBarTitleText": "工具箱",
 		"navigationBarBackgroundColor": "#F8F8F8",
 		"backgroundColor": "#F8F8F8"
 	},
