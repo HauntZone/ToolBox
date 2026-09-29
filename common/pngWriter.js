@@ -60,10 +60,62 @@ function makeChunk(type, data) {
 }
 
 /**
+ * PNG 的 tEXt 块按规范应当是 `关键字\0正文` 两段。但光棱坦克的参考实现
+ * （TankFactory/Mirage_Decode）是把预设字符串直接当整个块数据写的，没有关键字也没有
+ * 分隔符，读的时候也整块读回来。为了两边能互相认，这里必须跟着它写裸文本 ——
+ * 写成规范的 `关键字\0预设` 反而会让它的解码器解析不出来（它会拿关键字的首字符当反相位）。
+ * 实践中所有解码器都会忽略看不懂的 tEXt 块，不影响图片本身显示。
+ */
+function latin1Bytes(text) {
+	const bytes = new Uint8Array(text.length)
+	for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i) & 0xff
+	return bytes
+}
+
+function latin1String(bytes, start, length) {
+	let text = ''
+	for (let i = 0; i < length; i++) text += String.fromCharCode(bytes[start + i])
+	return text
+}
+
+function readUint32(bytes, offset) {
+	return ((bytes[offset] << 24) | (bytes[offset + 1] << 16) | (bytes[offset + 2] << 8) | bytes[offset + 3]) >>> 0
+}
+
+/**
+ * 从一个 PNG 文件的字节里找出第一个 tEXt 块的内容，没有就返回空串。
+ *
+ * 两种格式都认：规范的「关键字\0正文」取 \0 之后的部分；参考实现写的裸文本原样返回。
+ * 任何一步对不上（包括长度字段不合法）都直接返回空串 —— 元数据是锦上添花，
+ * 读不出来就退回默认参数，绝不能因为它把显形整个搞挂。
+ */
+export function readPngText(bytes) {
+	if (!bytes || bytes.length < 8) return ''
+	let pos = 8
+	while (pos + 8 <= bytes.length) {
+		const size = readUint32(bytes, pos)
+		// 长度字段不合法就直接放弃，避免越界读
+		if (size > bytes.length - pos - 12) return ''
+		const type = latin1String(bytes, pos + 4, 4)
+		if (type === 'tEXt') {
+			const data = latin1String(bytes, pos + 8, size)
+			const separator = data.indexOf('\u0000')
+			return separator === -1 ? data : data.slice(separator + 1)
+		}
+		if (type === 'IEND') return ''
+		pos += size + 12
+	}
+	return ''
+}
+
+/**
  * { width, height, data } → PNG 字节（Uint8Array）。data 是 RGBA 的 Uint8ClampedArray。
  * 会根据内容自动选灰度 / 灰度+alpha / 真彩+alpha 三种颜色类型。
+ *
+ * text 可选：给了就往 IEND 前面插一个 tEXt 块，用来携带光棱坦克的显形参数
+ * （见 prismTank.js 的 encodePreset / decodePreset）。
  */
-export function encodePng(image) {
+export function encodePng(image, text) {
 	if (!image || !image.data) throw new Error('缺少像素数据')
 	const width = image.width
 	const height = image.height
@@ -135,9 +187,11 @@ export function encodePng(image) {
 	const parts = [
 		new Uint8Array(SIGNATURE),
 		makeChunk('IHDR', ihdr),
-		makeChunk('IDAT', idat),
-		makeChunk('IEND', new Uint8Array(0))
+		makeChunk('IDAT', idat)
 	]
+	// tEXt 必须在 IEND 之前
+	if (text) parts.push(makeChunk('tEXt', latin1Bytes(text)))
+	parts.push(makeChunk('IEND', new Uint8Array(0)))
 	let total = 0
 	for (let i = 0; i < parts.length; i++) total += parts[i].length
 	const out = new Uint8Array(total)

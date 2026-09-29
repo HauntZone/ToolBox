@@ -23,6 +23,12 @@
 			"style": {
 				"navigationBarTitleText": "幻影坦克"
 			}
+		},
+		{
+			"path": "pages/prism-tank/prism-tank",
+			"style": {
+				"navigationBarTitleText": "光棱坦克"
+			}
 		}
 	],
 	"globalStyle": {

@@ -19,11 +19,17 @@
  *    彩色模式只能保证黑底图颜色准确，白底图会变成黑底图加一个固定亮度偏移。
  */
 
+import { EDGE_HARD, LUMA_R, LUMA_G, LUMA_B, clamp255, planSize, coverRect, composite } from './imageGeometry.js'
+
+// 几何/合成/亮度这些两个坦克都要用的纯函数已经搬到 imageGeometry.js，
+// 这里原样再导出一次，页面那边的 import 一个字都不用改。
+export { planSize, coverRect, composite }
+
 export const LIMITS = {
 	edgeOptions: [720, 1080, 1440],
 	edgeDefault: 1080,
 	// 硬上限：微信端 canvasGetImageData 有约 2000×2000 的内存 OOM 反馈
-	edgeHard: 1600,
+	edgeHard: EDGE_HARD,
 	// 亮度滑块用整数档位（除以 gainScale 使用）：
 	// 小程序 slider 的 step 用小数有被取整的风险
 	gainScale: 100,
@@ -38,14 +44,6 @@ export const LIMITS = {
 	gainBlackDefault: 30
 }
 
-const LUMA_R = 0.299
-const LUMA_G = 0.587
-const LUMA_B = 0.114
-
-function clamp255(value) {
-	return value < 0 ? 0 : value > 255 ? 255 : value
-}
-
 function clampGain(value, range, fallback) {
 	const min = range[0] / LIMITS.gainScale
 	const max = range[1] / LIMITS.gainScale
@@ -54,35 +52,6 @@ function clampGain(value, range, fallback) {
 	if (gain < min) return min
 	if (gain > max) return max
 	return gain
-}
-
-/**
- * 等比缩放到长边不超过 edge，且不放大（长边已经小于 edge 时原样返回）。
- * 返回的尺寸同时作为两张图的绘制尺寸，保证编码时两张图逐像素对齐。
- */
-export function planSize(width, height, edge) {
-	if (!width || !height) return { width: 0, height: 0 }
-	const limit = Math.min(edge || LIMITS.edgeHard, LIMITS.edgeHard)
-	const longEdge = Math.max(width, height)
-	if (longEdge <= limit) return { width, height }
-	const scale = limit / longEdge
-	return {
-		width: Math.max(1, Math.round(width * scale)),
-		height: Math.max(1, Math.round(height * scale))
-	}
-}
-
-/**
- * 把源图以 cover 方式（等比铺满、居中裁剪）画进目标尺寸时，需要取的源矩形。
- * 第二张图与第一张比例不同时用它裁剪，避免拉伸变形；源矩形由 canvas 自己取，
- * 不需要在 JS 里缩放像素。
- */
-export function coverRect(srcW, srcH, dstW, dstH) {
-	if (!srcW || !srcH || !dstW || !dstH) return { sx: 0, sy: 0, sw: dstW, sh: dstH }
-	const scale = Math.max(dstW / srcW, dstH / srcH)
-	const sw = Math.min(srcW, Math.max(1, Math.round(dstW / scale)))
-	const sh = Math.min(srcH, Math.max(1, Math.round(dstH / scale)))
-	return { sx: Math.round((srcW - sw) / 2), sy: Math.round((srcH - sh) / 2), sw, sh }
 }
 
 /**
@@ -218,32 +187,6 @@ export function encode({ onWhite, onBlack, options = {} }) {
 			transparentRatio: total ? alphaZero / total : 0
 		}
 	}
-}
-
-/**
- * 解码：把带 alpha 的图按指定灰度背景压平（background: 0 = 黑底，255 = 白底）。
- * 双预览是直接让渲染层把 PNG 叠在黑白背景上，不需要这个函数；
- * 它只用于“分别保存白底/黑底版本”时把结果变成不透明的图。
- */
-export function composite({ image, background = 255 }) {
-	if (!image || !image.data) throw new Error('缺少像素数据')
-	const width = image.width
-	const height = image.height
-	const total = width * height
-	const data = image.data
-	const out = new Uint8ClampedArray(total * 4)
-	const base = clamp255(background)
-
-	for (let i = 0, p = 0; i < total; i++, p += 4) {
-		const alpha = data[p + 3] / 255
-		const rest = (1 - alpha) * base
-		out[p] = alpha * data[p] + rest
-		out[p + 1] = alpha * data[p + 1] + rest
-		out[p + 2] = alpha * data[p + 2] + rest
-		out[p + 3] = 255
-	}
-
-	return { width, height, data: out }
 }
 
 /**
