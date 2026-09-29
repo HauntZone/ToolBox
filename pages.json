@@ -17,6 +17,12 @@
 			"style": {
 				"navigationBarTitleText": "计算器"
 			}
+		},
+		{
+			"path": "pages/phantom-tank/phantom-tank",
+			"style": {
+				"navigationBarTitleText": "幻影坦克"
+			}
 		}
 	],
 	"globalStyle": {
