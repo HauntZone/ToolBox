@@ -3,7 +3,10 @@ import {
 	predictDecodeRange, normalizeDecodeOptions, encodePreset, decodePreset, detectDecodeRange,
 	isPlausibleInnerRatio
 } from './prismTank.js'
-import { planSize, coverRect, composite, clamp255, downsampleImage, resizeCoverImage } from './imageGeometry.js'
+import {
+	planSize, coverRect, composite, clamp255, downsampleImage, resizeCoverImage,
+	planOddStep, sampleImageOddStep
+} from './imageGeometry.js'
 import { encodePng, readPngText } from './pngWriter.js'
 import { decodePng, isPng } from './pngReader.js'
 import { encode as phantomEncode, measureAlpha, LIMITS as PH_LIMITS, planSize as phPlanSize } from './phantomTank.js'
@@ -1340,6 +1343,135 @@ console.log('\n== 24. 纯 JS 的 PNG 解码（App 端不再依赖 canvas 读像�
 		ok('放大也正常', up && up.width === 8 && up.data[0] === 200)
 		eq('退化输入返回 null', resizeCoverImage(null, 10, 10), null)
 		eq('目标尺寸为 0 返回 null', resizeCoverImage(source, 0, 10), null)
+	}
+}
+
+console.log('\n== 25. 显形缩小必须用奇数步长抽样（插值缩放会毁掉棋盘格） ==')
+{
+	// 为什么要专门盯着这件事：显形侧本来是按「长边上限」（默认 720）缩小源图的，而缩小走的是
+	// resizeCoverImage 的双线性插值。光棱坦克图是棋盘格，插值会把相邻的表图像素（亮度 >= T）
+	// 和里图像素（<= t）平均进两带之间的空档，于是整片像素出带、被判成表图 —— 显出来就是
+	// 噪点加透明洞。症状很隐蔽：制作页的「模拟显形」预览在内存里做、不缩放，看着完全正常，
+	// 用户只会去怀疑传输和压缩。第 1 组断言就是这个 bug 的回归护栏。
+	//
+	// 缩多少都一样废：不缩放 50.0%，缩 0.1% 只剩 9.8%，缩一半 10.1%。所以「轻微缩小还能用」
+	// 这种想法不存在；要缩小只能整点抽样，而且**步长必须是奇数**（见下面第 3、4 组）。
+	const W = 1440, H = 960
+	function photo(shift) {
+		return makeImage(W, H, (x, y) => {
+			let v = 200 - 300 * Math.sqrt(((x - W / 2) / W) ** 2 + ((y - H / 2) / H) ** 2)
+			v += 40 * Math.sin((x + shift) * 0.01) * Math.cos(y * 0.01)
+			return gray(Math.max(0, Math.min(255, v)))
+		})
+	}
+	const cover = photo(31)
+	const inner = photo(0)
+	const encoded = encode({
+		cover, inner,
+		options: { coverThreshold: 42, innerThreshold: 24, coverGray: true, innerGray: true }
+	})
+	const statsOf = (image) => decode({ image, options: { lower: 0, higher: 24, iterations: 1 } }).stats
+	const ratioOf = (image) => statsOf(image).innerRatio
+
+	// ---- 1. 回归护栏：插值缩放一定毁掉棋盘格 ----
+	const native = ratioOf(encoded)
+	ok('不缩放时落带比例精确等于 50%', native === 0.5, native)
+	ok('不缩放时判据通过', isPlausibleInnerRatio(native))
+
+	for (const item of [['缩 0.1%', 1439, 959], ['缩一半', 720, 480]]) {
+		const scaled = ratioOf(resizeCoverImage(encoded, item[1], item[2]))
+		console.log('        ' + item[0] + '（' + item[1] + '×' + item[2] + '）落带 ' + (scaled * 100).toFixed(1) + '%')
+		ok('插值缩放「' + item[0] + '」后判据必须不通过（红了说明显形侧又改回按长边上限缩小了）',
+			!isPlausibleInnerRatio(scaled) && scaled < 0.15, scaled)
+	}
+
+	// ---- 2. 步长规划：只能取不小于 3 的奇数 ----
+	const plan = planOddStep(W, H, 720)
+	eq('步长规划 1440/720 的步长', plan.step, 3)
+	ok('步长规划的输出尺寸', plan.width === 480 && plan.height === 320, JSON.stringify(plan))
+	// 1440/1080 = 1.33 -> 向上取整得 2 -> 必须是奇数 -> 跳到 3。
+	// 代价是「1080 档」和「720 档」得到同一结果（都是 480），这个跳档是奇偶约束的必然
+	eq('1.33 倍超限也直接跳到 3（1080 档与 720 档同结果）', planOddStep(W, H, 1080).step, 3)
+	eq('3000/720 的步长', planOddStep(3000, 2000, 720).step, 5)
+	eq('已经够小的图不动', planOddStep(300, 200, 720).step, 1)
+	ok('已经够小的图尺寸不变（和 planSize 一样不放大）',
+		planOddStep(300, 200, 720).width === 300 && planOddStep(300, 200, 720).height === 200)
+	ok('非整除长边向上取整', planOddStep(1441, 960, 720).width === 481, planOddStep(1441, 960, 720).width)
+	{
+		// 扫一遍各种宽度和上限，确认永远不吐出偶数步长（1 是原样，不算缩小）
+		let even = 0
+		for (let w = 1; w <= 2000; w++) {
+			for (const edge of [180, 360, 720, 1080, 1440]) {
+				const step = planOddStep(w, 200, edge).step
+				if (step > 1 && step % 2 === 0) even++
+			}
+		}
+		eq('扫 1..2000 种宽度 × 5 种上限，偶数步长出现次数', even, 0)
+	}
+
+	// ---- 3. 抽样本身：只取原像素，棋盘格完好 ----
+	{
+		const sampled = sampleImageOddStep(encoded, 720)
+		eq('抽样用的步长', sampled.step, 3)
+		ok('抽样后的尺寸', sampled.width === 480 && sampled.height === 320, sampled.width + '×' + sampled.height)
+
+		const ratio = ratioOf(sampled)
+		console.log('        抽样到 480×320 后落带 ' + (ratio * 100).toFixed(1) + '%')
+		ok('抽样后落带比例仍然精确等于 50%', ratio === 0.5, ratio)
+		ok('抽样后判据通过', isPlausibleInnerRatio(ratio))
+		eq('抽样后里图像素数正好是一半', statsOf(sampled).innerPixels, sampled.width * sampled.height / 2)
+
+		// 取的是原像素、不是插值出来的值：这几处逐字节相同就说明没有插值
+		const at = (image, x, y) => image.data[(y * image.width + x) * 4 + 1]
+		ok('(0,0) 是源图原像素', at(sampled, 0, 0) === at(encoded, 0, 0))
+		ok('(1,0) 取的是源图第 3 列', at(sampled, 1, 0) === at(encoded, 3, 0))
+		ok('(0,1) 取的是源图第 3 行', at(sampled, 0, 1) === at(encoded, 0, 3))
+
+		const before = encoded.data.slice()
+		sampleImageOddStep(encoded, 720)
+		let untouched = true
+		for (let i = 0; i < before.length; i++) {
+			if (before[i] !== encoded.data[i]) { untouched = false; break }
+		}
+		ok('抽样不改写源缓冲', untouched)
+
+		const small = makeImage(300, 200, (x, y) => gray((x + y) % 256))
+		const same = sampleImageOddStep(small, 720)
+		eq('够小的图步长是 1', same.step, 1)
+		ok('够小的图共享同一份 data（不白拷一份）', same.data === small.data)
+	}
+
+	// ---- 4. 为什么步长必须是奇数：偶数步长下只剩同一奇偶类 ----
+	{
+		const step = 2
+		const w = Math.floor(encoded.width / step)
+		const h = Math.floor(encoded.height / step)
+		const data = new Uint8ClampedArray(w * h * 4)
+		for (let y = 0; y < h; y++) {
+			for (let x = 0; x < w; x++) {
+				const s = (y * step * encoded.width + x * step) * 4
+				const d = (y * w + x) * 4
+				data[d] = encoded.data[s]; data[d + 1] = encoded.data[s + 1]
+				data[d + 2] = encoded.data[s + 2]; data[d + 3] = encoded.data[s + 3]
+			}
+		}
+		eq('偶数步长 2 抽样后里图像素数（只剩同一类像素）',
+			statsOf({ width: w, height: h, data }).innerPixels, 0)
+	}
+
+	// ---- 5. 已知限制：只对标准棋盘格成立 ----
+	{
+		// 间隔 2 的条纹周期是 3，奇数步长 3 与它共振，抽出来全是表图。
+		// 显形侧**读不到**间隔（参考实现的元数据里没有这一位），所以这个限制没法在这里解决，
+		// 只能靠界面提示用户 —— 这条断言是提醒：别以为抽样是通用的
+		const withGap = encode({
+			cover, inner,
+			options: { coverThreshold: 42, innerThreshold: 24, coverGray: true, innerGray: true, gap: 2 }
+		})
+		const sampled = sampleImageOddStep(withGap, 720)
+		const ratio = ratioOf(sampled)
+		console.log('        间隔 2 的图抽样后落带 ' + (ratio * 100).toFixed(1) + '%（已知失效）')
+		ok('间隔 2 的图抽样后比例不可信（已知限制，靠文案交代）', !isPlausibleInnerRatio(ratio), ratio)
 	}
 }
 

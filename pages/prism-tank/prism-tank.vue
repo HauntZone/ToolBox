@@ -195,6 +195,15 @@
 					<image v-if="prismImage.src" class="slot-image" :src="prismImage.src" mode="aspectFit"></image>
 					<text v-else class="slot-plus">+</text>
 				</view>
+
+				<view class="row row-spaced">
+					<text class="label">按原尺寸显形</text>
+					<switch class="switch" color="#5B8FF9" :checked="decodeNativeSize" @change="onDecodeNativeSizeChange" />
+				</view>
+				<text class="hint">默认开：直接用源图的原始像素显形，不做任何缩放。光棱坦克是棋盘格，相邻像素一个落在表图亮度带、一个落在里图亮度带，「任何」插值缩放都会把两者平均进两带之间的空档 —— 实测把 1440×960 的图缩小 0.1% 落带比例就从 50% 掉到 9.8%，缩到 720×480 也只有 10.1%，缩多少都一样废。关掉后改用奇数步长抽样（只取原像素、不插值），实测步长 3 时落带比例仍是 50%；代价是分辨率变成 1/3，而且只对标准棋盘格安全</text>
+				<text v-if="decodeFormatNotice" class="inline-error">{{ decodeFormatNotice }}</text>
+				<text v-if="decodeSizeNotice" class="notice">{{ decodeSizeNotice }}</text>
+				<text v-if="decodeSampleNotice" class="notice">{{ decodeSampleNotice }}</text>
 			</view>
 
 			<view class="card">
@@ -291,6 +300,7 @@
 				<text class="preset-text">{{ presetInfo }}</text>
 			</view>
 			<text v-if="staleFull" class="notice">正在按全分辨率重算，出来之前先别保存</text>
+			<text v-if="decodeLiveSkipped" class="notice">这张图太大，拖动时不刷新预览，松手后重算</text>
 			<text v-if="decodeStatsText" class="notice">{{ decodeStatsText }}</text>
 		</block>
 
@@ -363,15 +373,22 @@
 		DECODE_HIGHER_DEFAULT,
 		encode,
 		decode,
-		predictDecodeRange,
 		validateEncodeOptions,
 		encodePreset,
 		decodePreset,
 		detectDecodeRange,
 		isPlausibleInnerRatio
 	} from '@/common/prismTank.js'
-	import { planSize, composite, downsampleImage } from '@/common/imageGeometry.js'
+	import {
+		planSize,
+		planOddStep,
+		sampleImageOddStep,
+		composite,
+		downsampleImage,
+		EDGE_HARD
+	} from '@/common/imageGeometry.js'
 	import { readPngText } from '@/common/pngWriter.js'
+	import { isPng } from '@/common/pngReader.js'
 	import {
 		chooseImages,
 		getImageSize,
@@ -442,8 +459,16 @@
 				iterationsMax: LIMITS.maxIterations,
 				// 锐化填充：默认关，走参考实现原样的权重
 				sharpenFill: false,
+				// 显形侧是否按源图原尺寸读像素。**默认开**：光棱坦克图是棋盘格，任何插值
+				// 缩放都会把相邻的表图/里图像素平均掉（实测缩 0.1% 落带比例就从 50% 掉到
+				// 9.8%），而现实里自己做的图最大也就 1440，按原尺寸读根本没有代价
+				// （实测 1600×1200 只多花 41MB / 181ms）。关掉才走奇数步长抽样，见 readDecodeCache
+				decodeNativeSize: true,
 				// 选图时从 PNG 的 tEXt 块里读到的显形参数，读到了就在这里说一声
 				presetInfo: '',
+				// 选进来的文件是不是 PNG。只有 PNG 能走纯 JS 精确解码，其它格式会退回
+				// canvas，而 canvas 扛不住超大尺寸 —— 提示文案据此分成两档
+				prismIsPng: null,
 				// 元数据有没有真的生效。没有的话就从图本身反推阈值（见 applyDetectedRange）
 				presetApplied: false,
 				// 已经因为"元数据和像素对不上"退回反推过了，避免来回重算
@@ -471,6 +496,14 @@
 				// 一次实时渲染的耗时几乎全在 exportPng 的 deflate 上，而它随面积走，
 				// 所以 320 -> 400 大约贵 1.5 倍。嫌卡就调小，嫌糊就调大。
 				previewEdge: 400,
+				// 解码缓冲超过这个像素数就不跑拖动时的实时预览。decode() 是同步的、跑在
+				// 完整缓冲上，实测 24MP 一帧 1415ms 会把主线程卡住、滑块拖不动；
+				// 1.9MP（现实里的上限）一帧 125ms，还在能接受的范围里，所以线划在 2MP。
+				// 注意只降输出没用 —— decode 必须跑在完整像素缓冲上，省不掉。
+				liveDecodeMaxPixels: 2000000,
+				// 因为上面这条跳过了实时预览。和 staleFull 分开，因为「什么都没在算」和
+				// 「正在重算」该说不同的话
+				decodeLiveSkipped: false,
 				liveBusy: false,
 				livePendingKind: '',
 				// 每次渲染领一个号，领到号之后才发现有更新的一轮在跑，就丢弃自己的结果。
@@ -531,6 +564,70 @@
 						: '')
 				)
 			},
+			// 关掉「按原尺寸显形」之后这张图会被抽到多大。只在提示里用，不参与读像素
+			decodePlan() {
+				return planOddStep(this.prismImage.width, this.prismImage.height, this.edge)
+			},
+
+			// 按原尺寸显形一遍大概要多少内存。实测（RSS 增量，含两次 PNG 导出）：
+			// 1600×1200 → +41M，6000×4000 → +599M，约为 RGBA 缓冲的 6.5 倍。
+			// 只是给用户判断「这张图值不值得按原尺寸跑」用的量级估计，别当精确值
+			decodeMemoryMB() {
+				const image = this.prismImage
+				if (!image.width || !image.height) return 0
+				return Math.round((image.width * image.height * 4 * 6.5) / 1048576)
+			},
+
+			// 不是 PNG、而且大到 canvas 扛不住时才报警。
+			// **小图的非 PNG 不该报**：那条路（画进 canvas 再读像素）本来就支持，读出来的像素
+			// 也是对的；只有超过 EDGE_HARD 才会真正出事 —— 那个上限就是为 canvas 的内存立的。
+			//
+			// 注意这条**没法靠关掉开关来规避**：抽样是在读完像素之后做的，读像素那一趟永远
+			// 按源图尺寸走。所以提示只能给一条真的能做到的出路（转成 PNG 或先缩小）。
+			decodeFormatNotice() {
+				const image = this.prismImage
+				if (this.prismIsPng !== false || !image.path) return ''
+				const longEdge = Math.max(image.width, image.height)
+				if (longEdge <= EDGE_HARD) return ''
+				return (
+					'这张图不是 PNG，长边 ' + longEdge + ' 又超过了 ' + EDGE_HARD + ' —— 只有 PNG 能走纯 JS ' +
+					'逐字节精确解码，其它格式只能退回系统 canvas，而 canvas 扛不住这么大的尺寸' +
+					'（按它的像素算，显形一遍约 ' + this.decodeMemoryMB + 'MB），在小程序 / App 上很可能直接崩。' +
+					'光棱坦克图本来就该是 PNG（本页导出的就是）：请先把它转成 PNG（或缩到 ' + EDGE_HARD + ' 以内）再试'
+				)
+			},
+
+			// 这张图比「长边上限」大、而且现在正按原尺寸显形时，说清楚「按原尺寸是准的」和
+			// 「关掉开关会缩到多少」，让用户自己拍板。光棱坦克图超过上限其实很少见（自己做最大 1440）。
+			// 开关已经关掉时不显示 —— 那时下面那条「抽样提示」讲的是同一件事
+			decodeSizeNotice() {
+				const image = this.prismImage
+				if (!this.decodeNativeSize || !image.path || !image.width) return ''
+				const longEdge = Math.max(image.width, image.height)
+				if (longEdge <= this.edge) return ''
+				const plan = this.decodePlan
+				return (
+					'这张图长边 ' + longEdge + '，比「长边上限」' + this.edge + ' 大。' +
+					'按原尺寸显形不缩放、像素是准的，代价是占内存（这张图约 ' + this.decodeMemoryMB + 'MB）与拖动变卡；' +
+					'关掉上面的开关会按步长 ' + plan.step + ' 抽样到 ' +
+					plan.width + '×' + plan.height + '（低分辨率，但棋盘格完好、仍能显形）'
+				)
+			},
+
+			// 当前正在用抽样缩小。必须说清楚它的已知限制：只对标准棋盘格成立
+			decodeSampleNotice() {
+				const cache = this.decodeCache
+				if (!cache || cache.step <= 1) return ''
+				const image = this.prismImage
+				return (
+					'当前按步长 ' + cache.step + ' 抽样，显形用的是 ' +
+					cache.pixels.width + '×' + cache.pixels.height +
+					'（源图 ' + image.width + '×' + image.height + '），结果是低分辨率的。' +
+					'抽样只对标准棋盘格（斜向 1、间隔 1）安全 —— 间隔 ≥2 的图显形侧读不到这两个参数，' +
+					'奇数步长可能只抽到表图，那种图请把开关打开'
+				)
+			},
+
 			// 直接把结论说出来，不让人去读数字
 			diagnosisText() {
 				if (this.mode === 'encode') {
@@ -556,13 +653,33 @@
 				const ratio = stats.innerRatio
 				if (isPlausibleInnerRatio(ratio)) return ''
 				// 这条如果出现，说明这个比例精确地落不到任何一个合理值上，基本可以断定
-				// 阈值和这张图不匹配。按可能性从高到低给三条出路，别只丢一句"检查阈值"
+				// 阈值和这张图不匹配。按可能性从高到低给几条出路，别只丢一句"检查阈值"。
+				//
+				// **「被缩小过」必须排在最前面**（当前正在抽样时）：它是本页自己造成的、
+				// 唯一一个一键能修的原因。这条踩过：原来的三条里没有它，用户照着②去点
+				// 「从图本身自动检测阈值」，而反推在缩过的图上同样是错的，只会越走越偏。
+				const causes = []
+				const cache = this.decodeCache
+				if (cache && cache.step > 1) {
+					causes.push(
+						'这张图被缩小过 —— 插值缩放会把棋盘格的亮度带糊掉。现在正按步长 ' + cache.step +
+						' 抽样，把上面的「按原尺寸显形」开关打开重试'
+					)
+				}
+				causes.push('这张图其实是反相的 —— 试试上面的「这张图是反相的」开关')
+				causes.push('图像被整体调过亮度或重压过，已经和它自带的参数对不上了 —— 点「从图本身自动检测阈值」')
+				causes.push('这张图根本不是光棱坦克')
+				if (!cache || cache.step <= 1) {
+					causes.push('这张图在到达本页之前就被别的工具缩小过 —— 插值缩放会糊掉亮度带，找没缩过的原图')
+				}
+				let list = ''
+				for (let i = 0; i < causes.length; i++) {
+					list += (i === 0 ? '' : '；') + ['①', '②', '③', '④', '⑤'][i] + ' ' + causes[i]
+				}
 				return (
 					'诊断：落进阈值带的只有 ' + (ratio * 100).toFixed(1) + '%，对不上任何合理间隔该有的比例' +
 					'（间隔 1~4 分别是 50% / 33% / 25% / 20%，框对的时候是精确相等的）。按可能性排查：' +
-					'① 这张图其实是反相的 —— 试试上面的「这张图是反相的」开关；' +
-					'② 图像被整体调过亮度或重压过，已经和它自带的参数对不上了 —— 点「从图本身自动检测阈值」；' +
-					'③ 这张图根本不是光棱坦克'
+					list
 				)
 			}
 		},
@@ -603,6 +720,8 @@
 					} else {
 						this.prismImage = image
 						this.decodeCache = null
+						// 上一张图如果大到跳过了实时预览，这个标记会留着，得跟着一起清掉
+						this.decodeLiveSkipped = false
 						// 先看这张图有没有自带显形参数（参考实现和我们自己导出的图会写在 PNG 的
 						// tEXt 块里），有就用它的，没有才用手上滑块的值
 						await this.detectPreset(image)
@@ -784,6 +903,19 @@
 				this.afterParamChange('decode')
 			},
 
+			/**
+			 * 切换「按原尺寸显形」。改的是读像素的尺寸，缓存必须整份作废重读 —— 照 setEdge 的写法。
+			 * **但不要跟着 markDirty()**：那个标记是给制作侧的（切到制作 tab 会显示「参数改过了，
+			 * 点生成刷新预览」），这里一个制作参数都没动。
+			 */
+			onDecodeNativeSizeChange(event) {
+				const value = event.detail.value
+				if (this.decodeNativeSize === value) return
+				this.decodeNativeSize = value
+				this.invalidateCaches()
+				if (this.prismImage.path) this.decodeImage()
+			},
+
 			setEdge(value) {
 				if (this.edge === value) return
 				this.edge = value
@@ -800,16 +932,26 @@
 			},
 
 			/**
-			 * 把制作的参数换算成显形该用的阈值区间 —— 会话内预填，
-			 * 制作完立刻把显形 tab 的滑块填好，省得两边对不上。
+			 * 由当前的制作参数推出「显形这张图时该用的那套参数」。
 			 *
-			 * 这里刻意**绕一圈预设**（encodePreset → decodePreset）而不是直接算阈值：
-			 * 走的是和「从图片元数据读回」完全相同的那条路，所以预填的值和自己导出的图
-			 * 再读回来的值永远一致 —— 包括对比度那个反向，不用在第二个地方再推导一遍。
+			 * 刻意**绕一圈预设**（encodePreset → decodePreset）而不是直接算阈值：走的是和
+			 * 「从图片元数据读回」完全相同的那条路，所以这里的值和自己导出的图再读回来的值
+			 * 永远一致 —— 包括对比度那个反向闭环，不用在第二个地方再推导一遍。
+			 *
+			 * 两个地方共用它：会话内预填（applyThresholdPrefill）、制作页的「模拟显形」预览
+			 * （renderEncode）。预览曾经漏了对比度，结果预览比真实显形差一个量级
+			 * （实测里图对比度 60 时：真实显形里图位 RMSE 0.82、预览 11.98）。
 			 */
-			applyThresholdPrefill() {
+			decodeParamsForEncode() {
 				const preset = decodePreset(encodePreset(this.isReverse, this.innerThreshold, this.innerContrast))
-				if (!preset) return
+				// encodePreset 会把色阶端夹到 >= 1，正常解不出 null；真出了就退回默认区间，
+				// 不让一个理论上到不了的分支把预览整个搞挂
+				return preset || { lower: DECODE_LOWER_DEFAULT, higher: DECODE_HIGHER_DEFAULT, contrast: 0 }
+			},
+
+			/** 把制作的参数填进显形 tab 的滑块 —— 制作完立刻填好，省得两边对不上 */
+			applyThresholdPrefill() {
+				const preset = this.decodeParamsForEncode()
 				this.decodeLower = preset.lower
 				this.decodeHigher = preset.higher
 				this.decodeContrast = preset.contrast
@@ -838,9 +980,14 @@
 				this.metadataRaw = ''
 				this.metadataRange = null
 				this.detectedRange = null
+				// 读不到文件字节时保持 null（未知），别留上一张图的值
+				this.prismIsPng = null
 				try {
 					const bytes = await readFileBytes(image.path)
 					if (!bytes) return
+					// 只有 PNG 能走纯 JS 精确解码，其它格式会退回 canvas。这条只用来决定
+					// 提示怎么写、不影响读像素（那边自己会挑路）
+					this.prismIsPng = isPng(bytes)
 					const raw = readPngText(bytes)
 					if (!raw) return
 					this.metadataRaw = raw
@@ -956,7 +1103,7 @@
 			//
 			// 读像素是平台调用（慢），全分辨率 PNG 导出是 pako 压缩（也慢），拖动滑块时
 			// 这两样都不能重来。所以：
-			//   读像素 -> 按「图 + 长边上限」缓存一次
+			//   读像素 -> 按「图 + 尺寸设置」缓存一次（制作侧按长边上限，显形侧按原尺寸）
 			//   拖动中 -> 只重跑纯逻辑，把结果降采样到 previewEdge 再导出（小图 pako 快得多）
 			//   松手后 -> 用全分辨率重算一遍
 			//
@@ -977,12 +1124,39 @@
 				this.encodeCache = { edge: this.edge, cover, inner }
 			},
 
+			/**
+			 * 显形缓存的键。像素缓冲按「这张图 + 用哪种尺寸读」缓存，任一变了一定要重建。
+			 * 用键而不是直接比 this.edge：开关翻转时可能还有一轮读取在飞，它回来时会写进
+			 * 一个按旧设置读出来的缓冲（同类坑踩过一次，见 detectPreset 里那段）。
+			 */
+			decodeKey() {
+				return this.decodeNativeSize ? 'native' : 'e' + this.edge
+			},
+
+			/**
+			 * 读显形用的像素。
+			 *
+			 * **永远按源图原尺寸读，不缩小。** 缩放在这里会毁掉棋盘格：readPixels 现在优先走
+			 * 「从文件字节纯 JS 解 PNG」+ resizeCoverImage，而后者是双线性插值 —— 插值会把
+			 * 相邻的表图像素（亮度 >= 表图色阶端）和里图像素（<= 里图色阶端）平均进两带之间的
+			 * 空档，于是整片像素出带、被判成表图，显出来就剩噪点和透明洞。
+			 * 实测（1440×960、t=24/T=42）：不缩放落带 50.0%；缩 0.1% 落带 9.8%；缩到 720×480
+			 * 落带 10.1% —— 缩多少都一样废，不存在「轻微缩小还能用」。
+			 *
+			 * 要缩小只能用 sampleImageOddStep 的奇数步长整点抽样，而且**必须在读完像素之后做**，
+			 * 不能把抽样后的尺寸当 target 传进来：那样 resizeCoverImage 会再插值一次，抽样白做；
+			 * 而且 App 端 readPixelsApp 用旧版 canvas，它的像素尺寸跟着模板 canvas 的 CSS 走，
+			 * CSS 又是 prepareCanvas(target) 设的 —— 两边必须是同一个尺寸，否则读到的是错像素。
+			 */
 			async readDecodeCache() {
 				const source = this.prismImage
-				const target = planSize(source.width, source.height, this.edge)
+				const target = { width: source.width, height: source.height }
 				await this.prepareCanvas(target.width, target.height)
-				const pixels = await readPixels(source.path, target, source, this)
-				this.decodeCache = { edge: this.edge, pixels }
+				const read = await readPixels(source.path, target, source, this)
+				const pixels = this.decodeNativeSize
+					? { width: read.width, height: read.height, data: read.data, step: 1 }
+					: sampleImageOddStep(read, this.edge)
+				this.decodeCache = { key: this.decodeKey(), step: pixels.step, pixels }
 			},
 
 			/**
@@ -1014,14 +1188,22 @@
 					}
 				})
 
-				// 模拟显形的阈值必须由当前参数推出来，不能读显形 tab 上的滑块值 ——
+				// 模拟显形的参数必须由当前制作参数推出来，不能读显形 tab 上的滑块值 ——
 				// 那两个值可能还停在别的档位上，会算出一张不对应本次参数的预览。
-				const range = predictDecodeRange(this.isReverse, this.innerThreshold)
+				//
+				// 走 decodeParamsForEncode（预设往返），所以**对比度那一格也是对的**：
+				// 真实显形会从元数据读出 -innerContrast 把制作时提上去的对比度还原，
+				// 这里不施加的话预览会明显发灰。实测（256px、里图对比度 60）：
+				// 真实显形里图位 RMSE 0.82，不施加对比度的预览 11.98 —— 预览会劝用户去调
+				// 本来就调对的参数，而对比度正是这条链上提升最明显的地方。
+				const preset = this.decodeParamsForEncode()
 				const revealed = decode({
 					image: encoded,
 					options: {
-						lower: range.lower,
-						higher: range.higher,
+						lower: preset.lower,
+						higher: preset.higher,
+						contrast: preset.contrast,
+						iterations: this.decodeIterations,
 						method: this.decodeMethod,
 						sharpenFill: this.sharpenFill
 					}
@@ -1059,7 +1241,15 @@
 
 			async renderDecode(full) {
 				const cache = this.decodeCache
-				if (!cache || cache.edge !== this.edge) return
+				if (!cache || cache.key !== this.decodeKey()) return
+				// 大图拖动时不跑实时预览：decode() 是同步的、跑在完整像素缓冲上，实测 24MP
+				// 一帧 1415ms，会把主线程卡住让滑块拖不动（输入尺寸没法降级 —— decode 必须
+				// 看到完整缓冲才能按亮度判带）。松手后的 full 那一轮照常算。
+				if (!full && cache.pixels.width * cache.pixels.height > this.liveDecodeMaxPixels) {
+					this.decodeLiveSkipped = true
+					return
+				}
+				if (full) this.decodeLiveSkipped = false
 				const token = ++this.renderToken
 
 				const revealed = decode({
@@ -1135,7 +1325,9 @@
 			// 松手 / 开关变化：用全分辨率重算。还没有缓存（没生成过）就只标脏，等用户点按钮
 			afterParamChange(kind) {
 				const cache = kind === 'encode' ? this.encodeCache : this.decodeCache
-				if (!cache || cache.edge !== this.edge) return
+				if (!cache) return
+				// 两边的缓存键不一样：制作侧跟长边上限走，显形侧跟「按不按原尺寸」走
+				if (kind === 'encode' ? cache.edge !== this.edge : cache.key !== this.decodeKey()) return
 				this.livePendingKind = ''
 				if (kind === 'encode') this.renderEncode(true)
 				else this.renderDecode(true)
@@ -1245,6 +1437,19 @@
 				// 两者对不上就说明这张图的像素和它自带的参数已经不是一回事了
 				if (this.prismImage.path) {
 					lines.push('—— 这张图 ——')
+					// 「读进来的是原生像素还是被缩过、缩到多少」是排查显形异常的第一手信息 ——
+					// 缩放会把棋盘格的亮度带糊掉，而且从别的几项数字上完全看不出来
+					lines.push('源文件类型：' + (this.prismIsPng === null
+						? '未知（没读到文件字节）'
+						: this.prismIsPng ? 'PNG（走纯 JS 精确解码）' : '不是 PNG（退回 canvas）'))
+					const cache = this.decodeCache
+					lines.push('读像素用的尺寸：' + (cache
+						? cache.pixels.width + '×' + cache.pixels.height +
+							(cache.step > 1
+								? '（源图 ' + this.prismImage.width + '×' + this.prismImage.height +
+									'，抽样步长 ' + cache.step + '）'
+								: '（按原尺寸）')
+						: '还没读'))
 					lines.push('元数据原文：' + (this.metadataRaw ? '「' + this.metadataRaw + '」' : '（没读到 tEXt 块）'))
 					lines.push('元数据给的阈值：' + (this.metadataRange
 						? this.metadataRange.lower + '~' + this.metadataRange.higher

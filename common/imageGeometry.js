@@ -104,6 +104,84 @@ export function downsampleImage(image, maxEdge) {
 }
 
 /**
+ * 奇数步长抽样的步长与输出尺寸规划。**只用于光棱坦克这类棋盘格图**，不要当通用缩放用。
+ *
+ * 为什么光棱坦克图不能插值缩放：它是棋盘格，相邻像素一个落在表图亮度带、一个落在里图
+ * 亮度带，任何插值都会把两者平均进两带之间的空档，于是整片像素出带、被判成表图。
+ * 实测（1440×960，里图色阶端 24 / 表图色阶端 42，阈值区间框对）：
+ *   不缩放 落带 50.0% ｜ 缩 0.1% 落带 9.8% ｜ 缩到 720×480 落带 10.1%
+ * 缩 0.1% 和缩一半没有本质区别 —— 只要插值动了一个像素就废，不存在「轻微缩小还能用」。
+ *
+ * 整点抽样（只取原像素、不插值）能保住棋盘格，前提是**步长必须是奇数**：
+ * (x + y) 的奇偶在奇数步长下交替保留，抽出来的每个像素都是真实的表图或里图像素。
+ * 实测同样是这张 1440×960：
+ *   步长 3 → 480×320，落带 50.0%（表图 / 里图各 76800）；步长 5 → 288×192，仍是 50%
+ *   步长 2（偶数）→ 720×480，落带 0.0%、里图像素数为 0（只取到同一奇偶类，全军覆没）
+ * 所以 2 必须跳到 3：凑不出「刚好缩到上限」这种结果，1.5 倍超限会直接抽成 1/3，
+ * 1440 的图选 1080 档和 720 档都得 step=3 → 480，1080 那一档形同虚设。
+ *
+ * 已知限制：只对标准棋盘格（斜向 1、间隔 1）成立。间隔 ≥2 时条纹周期是 gap+1，奇数步长
+ * 可能与它共振、只抽到表图。显形侧**拿不到**斜向和间隔（参考实现的元数据里没有这两位），
+ * 所以这个限制没法在这里解决，只能靠调用方提示用户。
+ */
+export function planOddStep(width, height, maxEdge) {
+	const longEdge = Math.max(width, height)
+	// 和 planSize 一样不放大：已经够小就原样（步长 1）
+	if (!width || !height || !maxEdge || maxEdge <= 0 || longEdge <= maxEdge) {
+		return { step: 1, width, height }
+	}
+
+	let step = Math.ceil(longEdge / maxEdge)
+	if (step < 3) step = 3
+	if (step % 2 === 0) step += 1
+
+	return {
+		step,
+		width: Math.max(1, Math.ceil(width / step)),
+		height: Math.max(1, Math.ceil(height / step))
+	}
+}
+
+/**
+ * 按奇数步长抽样缩小（只取原像素，不插值）。**只用于光棱坦克这类棋盘格图**，
+ * 步长怎么选、为什么必须是奇数见 planOddStep。
+ *
+ * 返回里带上**实际用的步长**，调用方不用自己再算一遍，也就不会出现「记下来的步长」
+ * 和「实际用的步长」对不上。已经够小（步长 1）时共享同一份 data 返回、不复制，
+ * 与 downsampleImage 的「够小就原样返回」一致 —— 调用方只读，不改写它。
+ */
+export function sampleImageOddStep(image, maxEdge) {
+	if (!image || !image.data) throw new Error('缺少像素数据')
+	const plan = planOddStep(image.width, image.height, maxEdge)
+	if (plan.step === 1) {
+		return { width: image.width, height: image.height, data: image.data, step: 1 }
+	}
+
+	const width = plan.width
+	const height = plan.height
+	const step = plan.step
+	const srcWidth = image.width
+	const src = image.data
+	const out = new Uint8ClampedArray(width * height * 4)
+
+	for (let y = 0; y < height; y++) {
+		const srcRow = y * step * srcWidth
+		const dstRow = y * width
+		for (let x = 0; x < width; x++) {
+			// outW = ceil(源宽 / step)，所以 (outW - 1) * step <= 源宽 - 1 恒成立，下标不用钳制
+			const s = (srcRow + x * step) * 4
+			const d = (dstRow + x) * 4
+			out[d] = src[s]
+			out[d + 1] = src[s + 1]
+			out[d + 2] = src[s + 2]
+			out[d + 3] = src[s + 3]
+		}
+	}
+
+	return { width, height, data: out, step }
+}
+
+/**
  * 把源图以 cover 方式（等比铺满、居中裁剪）缩放到指定尺寸，双线性插值。
  *
  * 逻辑照搬参考实现的 FallbackCommonProcess.resizeCover —— 因为 App 端现在不走 canvas 读像素了，

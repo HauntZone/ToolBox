@@ -396,7 +396,12 @@ async function readPixelsExact(path, target) {
 		if (!bytes) return null
 		const decoded = decodePng(bytes)
 		if (!decoded) return null
-		const resized = resizeCoverImage(decoded, target.width, target.height)
+		// 尺寸本来就一致就直接用：resizeCoverImage 的同尺寸分支会 slice 出一份完整拷贝，
+		// 24MP 上那是 60MB 的纯浪费。decoded 是这里刚解出来的、外部没人持有，直接返回安全。
+		// 光棱坦克的显形侧永远按源图尺寸读，走的就是这条短路。
+		const resized = decoded.width === target.width && decoded.height === target.height
+			? decoded
+			: resizeCoverImage(decoded, target.width, target.height)
 		if (!resized) return null
 		diag.canvasNode = '未使用（直接从文件字节解 PNG）'
 		noteReadData(resized.data)
