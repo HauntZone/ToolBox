@@ -36,32 +36,27 @@
 			</view>
 
 			<view class="card">
-				<text class="label">表图色阶端 {{ coverThreshold }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="表图色阶端"
+					:value="coverThreshold"
 					:min="coverThresholdMin"
 					:max="coverThresholdMax"
 					:step="thresholdStep"
-					:value="coverThreshold"
-					activeColor="#5B8FF9"
-					block-size="18"
 					@changing="onCoverThresholdChanging"
 					@change="onCoverThresholdChange"
-				/>
+				></tool-slider>
 				<text class="hint">表图的亮度被压进「色阶端 ~ 255」。调大 → 表图更灰、里图的亮度带更宽（量化台阶更少，但正常观看时那层噪点更明显）；调小则相反</text>
 
-				<text class="label row-spaced">里图色阶端 {{ innerThreshold }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="里图色阶端"
+					:value="innerThreshold"
 					:min="innerThresholdMin"
 					:max="innerThresholdMax"
 					:step="thresholdStep"
-					:value="innerThreshold"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onInnerThresholdChanging"
 					@change="onInnerThresholdChange"
-				/>
+				></tool-slider>
 				<text class="hint">里图的亮度被压进「0 ~ 色阶端」，显形时再把这一段拉伸回全量程。它必须小于表图色阶端，否则两张图的亮度带会重叠。这个值越大，里图还原得越准（误差约 255 ÷ 色阶端，默认 24 时约 10 级），代价是正常观看时噪点更明显</text>
 				<text v-if="thresholdError" class="inline-error">{{ thresholdError }}</text>
 
@@ -84,32 +79,27 @@
 			</view>
 
 			<view class="card">
-				<text class="label">里图对比度 {{ innerContrast }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="里图对比度"
+					:value="innerContrast"
 					:min="contrastMin"
 					:max="contrastMax"
 					:step="contrastStep"
-					:value="innerContrast"
-					activeColor="#5B8FF9"
-					block-size="18"
 					@changing="onInnerContrastChanging"
 					@change="onInnerContrastChange"
-				/>
+				></tool-slider>
 				<text class="hint">制作时「先」给里图提对比度，它才有足够的动态范围挤进那条只有几十级的窄带 —— 里图本身对比度低的时候，这一步是显形质量提升最明显的地方。这个值会写进图片元数据，显形时自动施加反向对比度还原，不用手动调</text>
 
-				<text class="label row-spaced">表图对比度 {{ coverContrast }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="表图对比度"
+					:value="coverContrast"
 					:min="contrastMin"
 					:max="contrastMax"
 					:step="contrastStep"
-					:value="coverContrast"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onCoverContrastChanging"
 					@change="onCoverContrastChange"
-				/>
+				></tool-slider>
 				<text class="hint">作用在表图上，只影响正常观看时的观感。注意这个值「不」写进元数据（参考实现也只存里图那一个），所以显形侧不会自动还原它</text>
 				<text class="hint">不合理的对比度会严重影响显形质量 —— 里图提得过高，超出带内的部分会被直接削掉</text>
 				<text v-if="innerContrast !== 0 || coverContrast !== 0" class="link" @click="resetContrast">重置对比度</text>
@@ -130,32 +120,28 @@
 				</view>
 				<text class="hint">按行就是把条纹横着铺，按列是竖着铺。默认的「按行 + 间隔 1 + 斜向 1」就是标准棋盘格</text>
 
-				<text class="label row-spaced">间隔 {{ gap }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="间隔"
+					:value="gap"
 					:min="gapMin"
 					:max="gapMax"
 					:step="1"
-					:value="gap"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onGapChanging"
 					@change="onGapChange"
-				/>
+				></tool-slider>
 				<text class="hint">条纹占 {{ gap }} 格、空 1 格，所以里图占 1/{{ gap + 1 }} 的像素。间隔越大表图越完整，但里图能用的采样点越少、显形越糊。「间隔大于 1 时显形那边的『扩散迭代次数』才有作用」—— 那时才会有覆盖像素在第一轮找不到可用的邻居</text>
 
-				<text class="label row-spaced">斜向 {{ slope }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="斜向"
+					:value="slope"
 					:min="slopeMin"
 					:max="slopeMax"
 					:step="1"
-					:value="slope"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onSlopeChanging"
 					@change="onSlopeChange"
-				/>
+				></tool-slider>
 				<text class="hint">0 表示不斜（整行 / 整列地切），1 以上把条纹压斜成一个角度。只改观感，不影响能不能显形</text>
 
 				<text class="label row-spaced">长边上限</text>
@@ -207,30 +193,35 @@
 			</view>
 
 			<view class="card">
-				<text class="label">阈值下界 {{ decodeLower }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="阈值下界"
+					:value="decodeLower"
 					:min="0"
 					:max="255"
 					:step="thresholdStep"
-					:value="decodeLower"
-					activeColor="#5B8FF9"
-					block-size="18"
 					@changing="onDecodeLowerChanging"
 					@change="onDecodeLowerChange"
-				/>
-				<text class="label row-spaced">阈值上界 {{ decodeHigher }}</text>
-				<slider
-					class="slider"
+				></tool-slider>
+				<tool-slider
+					label="阈值上界"
+					:value="decodeHigher"
 					:min="0"
 					:max="255"
 					:step="thresholdStep"
-					:value="decodeHigher"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onDecodeHigherChanging"
 					@change="onDecodeHigherChange"
-				/>
+				></tool-slider>
+				<!-- 显形结果就摆在滑块正下面：拖上下界的时候不用往下翻就能看到画面跟着变 -->
+				<view v-if="decodedPreview" class="previews row-spaced">
+					<view class="preview">
+						<text class="preview-title">显形结果</text>
+						<view class="stage stage-plain">
+							<image class="stage-image" :src="decodedPreview" mode="aspectFit"></image>
+						</view>
+						<text class="preview-note">缩小显示时相邻像素会被平均掉，看着比实际清楚；要看真实效果请点开看原图</text>
+					</view>
+				</view>
 				<text class="hint">非反相的光棱坦克：里图落在 0 ~ 里图色阶端（默认 0~24）。反相的落在 (255-色阶端) ~ 255（默认 231~255）。上界拖大会更亮，但表图的残影也会一起进来</text>
 				<text class="link" @click="prefillFromEncode">按上次制作参数预填</text>
 				<text class="link" @click="autoDetectRange">从图本身自动检测阈值</text>
@@ -254,19 +245,17 @@
 				</view>
 				<text class="hint">区间外的像素是表图，得靠邻居把它补出来。扩散填充是参考实现的做法（默认值）：反复取周围 24 个邻居里「已经确定」的那些加权平均，而第一轮里「已经确定」的全是真里图像素，所以填出来的值全部来自真实采样，不掺任何猜出来的数。黑色 / 白色更干净但会留网格；透明适合再加工</text>
 
-				<text v-if="decodeMethod === 'ltavg'" class="label row-spaced">扩散迭代次数 {{ decodeIterations }}</text>
-				<slider
+				<tool-slider
 					v-if="decodeMethod === 'ltavg'"
-					class="slider"
+					label="扩散迭代次数"
+					:value="decodeIterations"
 					:min="0"
 					:max="iterationsMax"
 					:step="1"
-					:value="decodeIterations"
-					activeColor="#5B8FF9"
-					block-size="18"
+					:spaced="true"
 					@changing="onDecodeIterationsChanging"
 					@change="onDecodeIterationsChange"
-				/>
+				></tool-slider>
 				<text v-if="decodeMethod === 'ltavg'" class="hint">标准棋盘格（间隔 1）下第一轮就能填满，这个值调多少结果都逐字节相同 —— 所以正常情况下它没有作用（实测 1 轮和 100 轮完全一致）。只有拿到间隔大于 1 的图，也就是别的工具用非默认交错做的图，才需要往上调</text>
 
 				<view v-if="decodeMethod === 'ltavg'" class="row row-spaced">
@@ -277,18 +266,15 @@
 			</view>
 
 			<view class="card">
-				<text class="label">对比度 {{ decodeContrast }}</text>
-				<slider
-					class="slider"
+				<tool-slider
+					label="对比度"
+					:value="decodeContrast"
 					:min="contrastMin"
 					:max="contrastMax"
 					:step="contrastStep"
-					:value="decodeContrast"
-					activeColor="#5B8FF9"
-					block-size="18"
 					@changing="onDecodeContrastChanging"
 					@change="onDecodeContrastChange"
-				/>
+				></tool-slider>
 				<text class="hint">制作时给里图提了多少对比度，这里就要反向施加多少把它还原。带元数据的图选进来会自动填好，不用手动调；这里主要是拿来救那些元数据丢了的图 —— 显形出来发灰、层次糊在一起，就往负的方向拉</text>
 			</view>
 
@@ -318,15 +304,6 @@
 					<image v-if="revealPreview" class="stage-image" :src="revealPreview" mode="aspectFit"></image>
 				</view>
 				<text class="preview-note">这一张是纯 JS 算的，不经过任何平台导出。它显不出里图就说明参数不对，不是平台的问题。改参数时它只按降分辨率实时刷新，松手后才出全分辨率；上面的「合成图外观」是棋盘格，缩小时网格会被平均掉，只在松手后刷新</text>
-			</view>
-		</view>
-		<view v-else-if="mode === 'decode' && decodedPreview" class="previews">
-			<view class="preview">
-				<text class="preview-title">显形结果</text>
-				<view class="stage stage-plain">
-					<image class="stage-image" :src="decodedPreview" mode="aspectFit"></image>
-				</view>
-				<text class="preview-note">缩小显示时相邻像素会被平均掉，看着比实际清楚；要看真实效果请点开看原图</text>
 			</view>
 		</view>
 
@@ -367,6 +344,9 @@
 </template>
 
 <script>
+	// 显式引入而不是只靠 easycom：万一 easycom 没生效，页面会直接报
+	// 「Unknown custom element: <tool-slider>」，而这里没法本地编译排查
+	import ToolSlider from '@/components/tool-slider/tool-slider.vue'
 	import {
 		LIMITS,
 		DECODE_LOWER_DEFAULT,
@@ -407,6 +387,7 @@
 	}
 
 	export default {
+		components: { ToolSlider },
 		data() {
 			return {
 				mode: 'encode',
@@ -755,46 +736,48 @@
 			},
 
 			// ---- 滑块拖动中（changing）：只出降分辨率预览，够看趋势就行 ----
-			onCoverThresholdChanging(event) {
-				this.coverThreshold = Number(event.detail.value)
+			// 这一批的 value 是从 <tool-slider> 直接抛出来的数字，不再是原生事件对象；
+			// 下面那些 <switch> 的 handler 仍然收 event.detail.value，别混
+			onCoverThresholdChanging(value) {
+				this.coverThreshold = value
 				this.scheduleLive('encode')
 			},
 
-			onInnerThresholdChanging(event) {
-				this.innerThreshold = Number(event.detail.value)
+			onInnerThresholdChanging(value) {
+				this.innerThreshold = value
 				this.scheduleLive('encode')
 			},
 
-			onDecodeLowerChanging(event) {
-				this.decodeLower = Number(event.detail.value)
+			onDecodeLowerChanging(value) {
+				this.decodeLower = value
 				this.scheduleLive('decode')
 			},
 
-			onDecodeHigherChanging(event) {
-				this.decodeHigher = Number(event.detail.value)
+			onDecodeHigherChanging(value) {
+				this.decodeHigher = value
 				this.scheduleLive('decode')
 			},
 
 			// ---- 松手（change）：用全分辨率重算一遍 ----
-			onCoverThresholdChange(event) {
-				this.coverThreshold = Number(event.detail.value)
+			onCoverThresholdChange(value) {
+				this.coverThreshold = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
 
-			onInnerThresholdChange(event) {
-				this.innerThreshold = Number(event.detail.value)
+			onInnerThresholdChange(value) {
+				this.innerThreshold = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
 
-			onDecodeLowerChange(event) {
-				this.decodeLower = Number(event.detail.value)
+			onDecodeLowerChange(value) {
+				this.decodeLower = value
 				this.afterParamChange('decode')
 			},
 
-			onDecodeHigherChange(event) {
-				this.decodeHigher = Number(event.detail.value)
+			onDecodeHigherChange(value) {
+				this.decodeHigher = value
 				this.afterParamChange('decode')
 			},
 
@@ -818,24 +801,24 @@
 			},
 
 			// ---- 对比度：拖动时实时预览，松手出全分辨率 ----
-			onInnerContrastChanging(event) {
-				this.innerContrast = Number(event.detail.value)
+			onInnerContrastChanging(value) {
+				this.innerContrast = value
 				this.scheduleLive('encode')
 			},
 
-			onInnerContrastChange(event) {
-				this.innerContrast = Number(event.detail.value)
+			onInnerContrastChange(value) {
+				this.innerContrast = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
 
-			onCoverContrastChanging(event) {
-				this.coverContrast = Number(event.detail.value)
+			onCoverContrastChanging(value) {
+				this.coverContrast = value
 				this.scheduleLive('encode')
 			},
 
-			onCoverContrastChange(event) {
-				this.coverContrast = Number(event.detail.value)
+			onCoverContrastChange(value) {
+				this.coverContrast = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
@@ -855,46 +838,46 @@
 				this.afterParamChange('encode')
 			},
 
-			onGapChanging(event) {
-				this.gap = Number(event.detail.value)
+			onGapChanging(value) {
+				this.gap = value
 				this.scheduleLive('encode')
 			},
 
-			onGapChange(event) {
-				this.gap = Number(event.detail.value)
+			onGapChange(value) {
+				this.gap = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
 
-			onSlopeChanging(event) {
-				this.slope = Number(event.detail.value)
+			onSlopeChanging(value) {
+				this.slope = value
 				this.scheduleLive('encode')
 			},
 
-			onSlopeChange(event) {
-				this.slope = Number(event.detail.value)
+			onSlopeChange(value) {
+				this.slope = value
 				this.markDirty()
 				this.afterParamChange('encode')
 			},
 
 			// ---- 显形侧 ----
-			onDecodeContrastChanging(event) {
-				this.decodeContrast = Number(event.detail.value)
+			onDecodeContrastChanging(value) {
+				this.decodeContrast = value
 				this.scheduleLive('decode')
 			},
 
-			onDecodeContrastChange(event) {
-				this.decodeContrast = Number(event.detail.value)
+			onDecodeContrastChange(value) {
+				this.decodeContrast = value
 				this.afterParamChange('decode')
 			},
 
-			onDecodeIterationsChanging(event) {
-				this.decodeIterations = Number(event.detail.value)
+			onDecodeIterationsChanging(value) {
+				this.decodeIterations = value
 				this.scheduleLive('decode')
 			},
 
-			onDecodeIterationsChange(event) {
-				this.decodeIterations = Number(event.detail.value)
+			onDecodeIterationsChange(value) {
+				this.decodeIterations = value
 				this.afterParamChange('decode')
 			},
 
@@ -1569,10 +1552,6 @@
 
 	.switch {
 		transform: scale(0.85);
-	}
-
-	.slider {
-		margin: 8rpx 0 0;
 	}
 
 	.slots {

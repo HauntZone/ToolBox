@@ -18,6 +18,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - **平台适配层**：唯一允许出现平台代码的地方（选图 / canvas 读像素 / 导出文件 / 存相册）。平台专有全局用 `// #ifdef` 包起来，**但分支调度用运行时探测**（`uni.getSystemInfoSync().uniPlatform` + 能力探测），不要只靠 `#ifdef` —— 这样即使条件编译行为异常也不会走错分支。
     - `imagePlatform.js` 是**唯一**的实现，与业务无关的部分全在这里，靠 `canvasId` 和文件名前缀两个参数区隔。
     - `phantomTankAdapter.js` / `prismTankAdapter.js` 只是填这两个常量的薄壳，页面从它们 import，所以页面里不出现平台常量。
+- `components/` 放跨页面复用的 UI 组件，目前只有 `tool-slider`。**滑块一律用它，不要再用原生
+  `<slider>`** —— 原生那个只有十几像素的小圆点能按、轨道又细，手指很难按准（用户反馈过）。
+  组件的取值换算在 `common/sliderMath.js`（纯逻辑，有测试），组件本身只做触摸、量测和渲染。
 - 页面里不要直接写平台代码。
 
 ## 第三方库：vendor，不用 npm

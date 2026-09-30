@@ -22,6 +22,26 @@ ELECTRON_RUN_AS_NODE=1 "$CODE" "$T/tanks.test.mjs"
 
 退出码 0 = 全部通过。改过这几个内核之后请跑一遍。
 
+## 滑块取值换算
+
+`sliderMath.test.mjs` 覆盖 `common/sliderMath.js`（`<tool-slider>` 组件用的值 ↔ 位置换算）。
+它不依赖别的模块，临时目录里只要这两个文件：
+
+```bash
+CODE="/c/Users/HauntZone/AppData/Local/Programs/Microsoft VS Code/Code.exe"
+
+T=$(mktemp -d)
+cp common/sliderMath.js test/sliderMath.test.mjs "$T/"
+printf '{"type":"module"}' > "$T/package.json"
+
+ELECTRON_RUN_AS_NODE=1 "$CODE" "$T/sliderMath.test.mjs"
+```
+
+它盯的是两处真会错的地方：**对比度 `min=-255 / step=5` 时两端必须恰好可达**（"-255 + 102×5"
+在浮点里是 255.00000000000003，会直接显示到界面上），以及**阈值类 `0~255 / step=1` 每个整数
+档位都要有对应的触点区间**（否则手指停不到具体值）。窄屏那一档（轨道按 258px 算）也在里面 ——
+那是现实里最窄的情况。
+
 ## 为什么值得留着
 
 这几个模块是纯函数、无平台依赖，所以能在 App / 小程序 / H5 之外直接验证。
