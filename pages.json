@@ -1,34 +1,52 @@
 {
-	"pages": [ //pages数组中第一项表示应用启动页，参考：https://uniapp.dcloud.io/collocation/pages
+	"pages": [ //主包：只放首页。首页是要最先渲染的，留在主包里启动最快
 		{
 			"path": "pages/index/index",
 			"style": {
 				"navigationStyle": "custom"
 			}
+		}
+	],
+	/* 分包：工具页都在这儿，点开才下载对应那个分包。
+	   按「共用代码」分而不是按「一个工具一个分包」——见下面 pages/tank 的说明 */
+	"subPackages": [
+		{
+			// 二维码和计算器各自独立，互相不共用任何 common/ 模块
+			"root": "pages/tools",
+			"pages": [
+				{
+					"path": "qrcode/qrcode",
+					"style": {
+						"navigationBarTitleText": "二维码生成"
+					}
+				},
+				{
+					"path": "calculator/calculator",
+					"style": {
+						"navigationBarTitleText": "计算器"
+					}
+				}
+			]
 		},
 		{
-			"path": "pages/qrcode/qrcode",
-			"style": {
-				"navigationBarTitleText": "二维码生成"
-			}
-		},
-		{
-			"path": "pages/calculator/calculator",
-			"style": {
-				"navigationBarTitleText": "计算器"
-			}
-		},
-		{
-			"path": "pages/phantom-tank/phantom-tank",
-			"style": {
-				"navigationBarTitleText": "幻影坦克"
-			}
-		},
-		{
-			"path": "pages/prism-tank/prism-tank",
-			"style": {
-				"navigationBarTitleText": "光棱坦克"
-			}
+			/* 两个坦克必须同包：它们共用 imagePlatform / imageGeometry / pngReader /
+			   pngWriter / pako。分包优化的规则是「只被一个分包引用的 js 才移出主包」，
+			   拆成两个分包的话这些文件被两个分包同时引用，只能退回主包留着 */
+			"root": "pages/tank",
+			"pages": [
+				{
+					"path": "phantom-tank/phantom-tank",
+					"style": {
+						"navigationBarTitleText": "幻影坦克"
+					}
+				},
+				{
+					"path": "prism-tank/prism-tank",
+					"style": {
+						"navigationBarTitleText": "光棱坦克"
+					}
+				}
+			]
 		}
 	],
 	"globalStyle": {

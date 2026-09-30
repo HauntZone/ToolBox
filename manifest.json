@@ -11,7 +11,7 @@
         "nvueStyleCompiler" : "uni-app",
         "compilerVersion" : 3,
         "splashscreen" : {
-            "alwaysShowBeforeRender" : true,
+            "alwaysShowBeforeRender" : false,
             "waiting" : true,
             "autoclose" : true,
             "delay" : 0
@@ -59,7 +59,10 @@
                 "dSYMs" : false
             },
             /* SDK配置 */
-            "sdkConfigs" : {}
+            "sdkConfigs" : {},
+            "splashscreen" : {
+                "useOriginalMsgbox" : false
+            }
         }
     },
     /* 快应用特有相关 */
@@ -70,7 +73,12 @@
         "setting" : {
             "urlCheck" : false
         },
-        "usingComponents" : true
+        "usingComponents" : true,
+        /* 分包优化：只被一个分包引用的 js / 组件，打包进那个分包、不再打进主包。
+           不开这一项的话 pages.json 里的 subPackages 只是多一层目录，主包一点都不会变小 */
+        "optimization" : {
+            "subPackages" : true
+        }
     },
     "mp-alipay" : {
         "usingComponents" : true

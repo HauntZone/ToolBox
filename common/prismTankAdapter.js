@@ -18,7 +18,7 @@ import {
 	releaseImage as releaseImagePlatform
 } from './imagePlatform.js'
 
-// 要和 pages/prism-tank/prism-tank.vue 模板里那个隐藏画布的 id 一致
+// 要和 pages/tank/prism-tank/prism-tank.vue 模板里那个隐藏画布的 id 一致
 const CANVAS_ID = 'prismCanvas'
 // 只用来认出「哪些文件是我们自己写出来的」，回收时据此判断能不能删
 const FILE_PREFIX = 'prism-'
