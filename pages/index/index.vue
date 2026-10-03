@@ -33,11 +33,7 @@
 					{ name: '二维码', desc: '文本生成二维码', icon: '▦', color: '#269A99', path: '/pages/tools/qrcode/qrcode' },
 					{ name: '计算器', desc: '日常四则运算', icon: '=', color: '#5B8FF9', path: '/pages/tools/calculator/calculator' },
 					{ name: '幻影坦克', desc: '双图隐藏合成', icon: '◨', color: '#3E4C59', path: '/pages/tank/phantom-tank/phantom-tank' },
-					{ name: '光棱坦克', desc: '棋盘格双图隐藏', icon: '▚', color: '#EB2F96', path: '/pages/tank/prism-tank/prism-tank' },
-					{ name: '时间戳转换', desc: 'Unix 时间与日期互转', icon: '⏱', color: '#F6BD16', path: '' },
-					{ name: 'JSON 格式化', desc: '格式化 / 压缩 / 校验', icon: '{}', color: '#5AD8A6', path: '' },
-					{ name: '编码解码', desc: 'Base64 / URL 编码', icon: '⇄', color: '#9270CA', path: '' },
-					{ name: '正则测试', desc: '实时匹配与高亮', icon: '.*', color: '#E8684A', path: '' }
+					{ name: '光棱坦克', desc: '棋盘格双图隐藏', icon: '▚', color: '#EB2F96', path: '/pages/tank/prism-tank/prism-tank' }
 				]
 			}
 		},
