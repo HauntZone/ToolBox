@@ -60,9 +60,7 @@
             },
             /* SDK配置 */
             "sdkConfigs" : {
-                "ad" : {
-                    "gm" : {}
-                }
+                "ad" : {}
             },
             "splashscreen" : {
                 "useOriginalMsgbox" : false
